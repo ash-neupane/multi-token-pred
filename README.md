@@ -1,2 +1,2 @@
-## Getting Started with Interpretability Research
-Looking for indirect object identification circuits along the lines of [Interpretability in the wild: A circuit for Indirect Object Identification in GPT-2 Small](https://arxiv.org/pdf/2211.00593.pdf)
+## Training toy language models with a multi-token prediction objective
+Along the lines of [Better & Faster Large Language Models via Multi-token Prediction](https://arxiv.org/abs/2404.19737)
