@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 import math
 import torch
 from torch import nn
@@ -55,16 +56,18 @@ class VanillaTransformer(nn.Module):
         x = self.transformer.ln_f(x)
 
         if targets is not None:
-            logits = self.lm_head(x)
-            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1)
+            logits = self.lm_head(x[:, [-1], :]) # use [-1] to preserve T dimension
+            # print("logits: ", logits.size(), logits.dtype, logits.device)
+            # print("logits reshaped: ", logits.view(-1, logits.size(-1)).size())
+            # print("targets reshaped: ", targets.view(-1).size())
+            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.to(torch.long).view(-1), ignore_index=-1)
         else:
-            # at inference, only forward lm_head on the very last position 
             logits = self.lm_head(x[:, [-1], :]) # use [-1] to preserve T dimension
             loss = None
 
         return logits, loss
     
-    @torch.no_grad
+    @torch.no_grad()
     def generate(self, context, max_new_tokens, temp=0.5, top_k=None):
         """
         """
@@ -106,8 +109,11 @@ class CausalSelfAttention(nn.Module):
         assert self.d_model % self.n_heads == 0, "d_model has to be a multiple of n_heads"
         self.attn_dim = self.d_model // self.n_heads
 
-        self.w_attn = nn.Linear(self.d_model, 3 * config.d_model, bias=False) # 3 for Q, K, V
+        self.w_attn = nn.Linear(self.d_model, 3 * self.d_model, bias=False) # 3 for Q, K, V
         self.w_proj = nn.Linear(self.d_model, self.d_model, bias=False)
+        # causal mask to ensure that attention is only applied to the left in the input sequence
+        self.register_buffer("bias", torch.tril(torch.ones(self.block_size, self.block_size))
+                                            .view(1, 1, self.block_size, self.block_size))
 
     def forward(self, context):
         """
@@ -116,9 +122,9 @@ class CausalSelfAttention(nn.Module):
             raise ValueError(f"Input tensor {context.size} doesn't match block size of {self.block_size}") 
         B, T, C = context.size() # batch size, sequence length, embedding dimensionality (n_embd)
         q, k, v = self.w_attn(context).split(self.d_model, dim=2)
-        k = k.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
-        q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
-        v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
+        k = k.view(B, T, self.n_heads, C // self.n_heads).transpose(1, 2) # (B, nh, T, hs)
+        q = q.view(B, T, self.n_heads, C // self.n_heads).transpose(1, 2) # (B, nh, T, hs)
+        v = v.view(B, T, self.n_heads, C // self.n_heads).transpose(1, 2) # (B, nh, T, hs)
 
         att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
         att = att.masked_fill(self.bias[:,:,:T,:T] == 0, float('-inf'))
