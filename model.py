@@ -79,7 +79,7 @@ class MultiTokenTransformer(nn.Module):
         for _ in range(max_new_tokens):
             context_cropped = context if context.size(1) < self.block_size else context[:, -self.block_size:]
             logits, _ = self(context_cropped)
-            logits = logits[:, -1, :] / temp
+            logits = logits[0, :, -1, :] / temp # decode by taking just the first of the next token preds
             # sample only from top_k if that's enabled
             if top_k is not None:
                 v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
