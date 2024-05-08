@@ -11,6 +11,83 @@ class ModelConfig:
     n_layer: int = 0 # number of layers
     n_heads: int = 0 # number of attention heads in each block
     d_model: int = 0 # model dimension (dimension of residual stream)
+    n_token: int = 0 # number of tokens to predict
+
+class MultiTokenTransformer(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.vocab_size = config.vocab_size
+        self.d_model = config.d_model
+        self.block_size = config.block_size
+        self.n_layer = config.n_layer
+        self.n_token = config.n_token
+        self.shared_trunk = nn.ModuleDict(dict(
+            wte = nn.Embedding(self.vocab_size, self.d_model),
+            wpe = nn.Embedding(self.block_size, self.d_model),
+            h = nn.ModuleList(
+                [TransformerBlock(config) for _ in range(self.n_layer)]
+            ),
+            output_blocks = nn.ModuleList(
+                [TransformerBlock(config) for _ in range(self.n_token)]
+            ),
+            ln_f = nn.LayerNorm(self.d_model) # final layer norm before unembed
+        ))
+        self.lm_head = [nn.Linear(self.d_model, self.vocab_size, bias=False) for _ in self.n_token]
+        self.transformer.wte.weight = self.lm_head.weight # weight tying to reduce num params
+
+    def get_num_params(self, non_embedding=True):
+        n_params = sum(p.numel() for p in self.parameters())
+        if non_embedding:
+            n_params -= self.transformer.wpe.weight.numel()
+        return n_params
+
+    def forward(self, context, targets=None):
+        device = context.device
+        B, T = context.size()
+        assert T <= self.block_size, f"Can't forward context w len {T}, max {self.block_size}"
+        pos = torch.arange(0, T, dtype=torch.long, device=device)
+
+        # embed
+        tok_emb = self.transformer.wte(context)
+        pos_emb = self.transformer.wpe(pos)
+        x = tok_emb + pos_emb
+
+        # apply blocks
+        for block in self.transformer.h:
+            x = block(x)
+        
+        # TODO: apply the output blocks for each token pred
+        # TODO: update the data loader to get the targets
+        # this step will expand the size of x from (B, T, V) to (N_t, B, T, V)
+
+        # then pre-unembed layer norm
+        x = self.transformer.ln_f(x)
+
+        if targets is not None:
+            logits = self.lm_head(x[:, :, [-1], :]) # use [-1] to preserve T dimension
+            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.to(torch.long).view(-1), ignore_index=-1)
+        else:
+            logits = self.lm_head(x[:, :, [-1], :]) # N_t x B x T x V 
+            loss = None
+
+        return logits, loss
+    
+    @torch.no_grad()
+    def generate(self, context, max_new_tokens, temp=0.5, top_k=None):
+        """
+        """
+        for _ in range(max_new_tokens):
+            context_cropped = context if context.size(1) < self.block_size else context[:, -self.block_size:]
+            logits, _ = self(context_cropped)
+            logits = logits[:, -1, :] / temp
+            # sample only from top_k if that's enabled
+            if top_k is not None:
+                v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
+                logits[logits < v[:, [-1]]] = -float("Inf")
+            probs = F.softmax(logits, dim=-1)
+            next_token = torch.multinomial(probs, num_samples=1)
+            context = torch.cat((context, next_token), dim=1)
+        return context 
 
 class VanillaTransformer(nn.Module):
     def __init__(self, config):
