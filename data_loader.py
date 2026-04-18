@@ -3,49 +3,62 @@ from torch.utils.data import DataLoader, Dataset
 import pandas as pd
 from typing import List
 import random
+from tqdm import tqdm
+import tiktoken
 
 class ShortJokesDataLoader(DataLoader):
-    def __init__(self, dataset: Dataset, batch_size: int, block_size: int, shuffle: bool = False) -> None:
+    def __init__(self, dataset: Dataset, batch_size: int, block_size: int) -> None:
         """
         """
         self.dataset = dataset
         self.batch_size = batch_size
         self.block_size = block_size
-        self.shuffle = shuffle
-        self.indices = list(range(0, len(self.dataset)))
+        self.data_len = len(self.dataset)
     
     def __iter__(self) -> List[str]:
         """
         """
-        if self.shuffle:
-            random.shuffle(self.indices)
-        for start_idx in range(0, len(self.dataset), self.batch_size):
-            batch_indices = self.indices[start_idx:start_idx+self.batch_size]
-            batch_jokes = torch.tensor(
-                sum(
-                    [self.dataset[i] for i in batch_indices], 
-                    [self.dataset.bos_encoded] * (self.block_size)
-                ) + 
-                [self.dataset.bos_encoded,], 
-                dtype=torch.int32
-            )
-            context = torch.empty((len(batch_jokes) - self.block_size, self.block_size), dtype=torch.int32) # N x block_size
-            for i in range(0, len(batch_jokes)-self.block_size):
-                context[i] = batch_jokes[i:i+self.block_size]                
-            targets = batch_jokes[self.block_size:]
-            yield context, targets
+        start_ix = torch.randint(self.data_len-self.block_size, (self.batch_size,))
+        context = torch.stack(
+            [self.dataset[i:i+self.block_size] for i in start_ix]
+        )
+        targets = torch.stack(
+            [self.dataset[i+1:i+1+self.block_size] for i in start_ix]
+        )
+
+        yield context, targets
 
 class ShortJokes(Dataset):
-    def __init__(self, data_file="data/shortjokes.csv") -> None:
+    def __init__(self, tokenization="bpe", max_tokens=6e6, data_file="data/shortjokes.csv") -> None:
         self.data = [self.clean(j) for j in pd.read_csv(data_file)["Joke"]]
         self.bos_token = "<s>"
         self.bos_encoded = 0
-        self._vocab = [self.bos_token,] + sorted(list(set("".join(self.data))))
-        self._vocab_size = len(self._vocab)
-        self._size = len(self.data)
+        
+        if tokenization == "char":
+            self._vocab = [self.bos_token,] + sorted(list(set("".join(self.data))))
+            self.vocab_size = len(self._vocab)
+            self.stoi = {ch: i for i, ch in enumerate(self._vocab)}
+            self.itos = {i: ch for i, ch in enumerate(self._vocab)}
+            
+            encoded_data = torch.tensor([], dtype=torch.int32)
+            for joke in tqdm(self.data):
+                encoded_joke = torch.tensor([self.bos_encoded,] + self.encode(joke), dtype=torch.int32)
+                encoded_data = torch.cat((encoded_data, encoded_joke))
+                if encoded_data.size(0) > max_tokens:
+                    break
+            
+        elif tokenization == "bpe":
+            enc = tiktoken.get_encoding("gpt2")
+            self.vocab_size = 50257 # TODO: get this automatically 
 
-        self.stoi = {ch: i for i, ch in enumerate(self._vocab)}
-        self.itos = {i: ch for i, ch in enumerate(self._vocab)}
+            encoded_data = torch.tensor([], dtype=torch.int32)
+            for joke in tqdm(self.data):
+                encoded_joke = torch.tensor([self.bos_encoded,] + enc.encode_ordinary(joke), dtype=torch.int32)
+                encoded_data = torch.cat((encoded_data, encoded_joke))
+                if encoded_data.size(0) > max_tokens:
+                    break
+        print("encoded data size", encoded_data.size())
+        self.data = encoded_data
 
     def clean(self, joke: str) -> str:
         joke = joke.lower().strip()
@@ -68,10 +81,10 @@ class ShortJokes(Dataset):
         return self._vocab_size 
     
     def __len__(self):
-        return self._size
+        return len(self.data)
     
     def __getitem__(self, i):
-        return self.encode(self.data[i])
+        return self.data[i]
 
     def print_dataset_stats(self):
         print("\n-----Dataset Stats-------------")
@@ -87,3 +100,6 @@ class ShortJokes(Dataset):
         unique_chars = sorted(list(set(chars)))
         print("Unique: ", len(unique_chars), unique_chars)
         print("------------------------\n")
+
+if __name__ == "__main__":
+    ShortJokes(tokenization="bpe")

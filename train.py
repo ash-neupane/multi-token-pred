@@ -7,14 +7,16 @@ import time
 
 device = "cpu"
 batch_size = 1
-max_iter = 1e4
-PRINT_FREQUENCY = 5e2
+max_iter = 4
+PRINT_FREQUENCY = 1
 
-jokes_dataset = ShortJokes()
+# tokenization = "char"
+tokenization = "bpe"
+jokes_dataset = ShortJokes(tokenization=tokenization)
 #jokes_dataset.print_dataset_stats()
 
 block_size = 32
-jokes_loader = ShortJokesDataLoader(jokes_dataset, batch_size, block_size, shuffle=True)
+jokes_loader = ShortJokesDataLoader(jokes_dataset, batch_size, block_size)
 
 model = VanillaTransformer(
     ModelConfig(
@@ -27,7 +29,7 @@ model = VanillaTransformer(
 )
 model.to(device)
 print("Num parameters: ", model.get_num_params())
-optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-2, betas=(0.9, 0.99), eps=1e-8)
+optimizer = torch.optim.AdamW(model.parameters(), lr=5e-4, weight_decay=1e-2, betas=(0.9, 0.99), eps=1e-8)
 
 print("BEGIN TRAINING")
 n_steps = 0
@@ -55,7 +57,7 @@ for _ in range(epochs):
 total_elapsed_time = time.perf_counter() - global_start_time
 print(f"Completed training after [{n_steps}] batches. Loss: {loss}. Avg time per iteration: {avg_time_per_iter:.4f} sec")
 print(f"Total training time: {(total_elapsed_time)/(60.0)} mins")
-torch.save(model.state_dict(), f"model/{type(model).__name__.lower()}.pth")
+torch.save(model.state_dict(), f"model/{tokenization}_{type(model).__name__.lower()}.pth")
 
 # print("-------------------------------------------\nUNIFORM INITIALIZATION\n")
 # print("uniform probability: ", 1/70)

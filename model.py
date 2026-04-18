@@ -133,7 +133,7 @@ class VanillaTransformer(nn.Module):
         x = self.transformer.ln_f(x)
 
         if targets is not None:
-            logits = self.lm_head(x[:, [-1], :]) # use [-1] to preserve T dimension
+            logits = self.lm_head(x) # use [-1] to preserve T dimension
             # print("logits: ", logits.size(), logits.dtype, logits.device)
             # print("logits reshaped: ", logits.view(-1, logits.size(-1)).size())
             # print("targets reshaped: ", targets.view(-1).size())

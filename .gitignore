@@ -5,6 +5,14 @@ __pycache__/
 
 data/
 model/
+*.pt
+*.ckpt
+*.pth
+.env
+.env.*
+.venv/
+venv/
+.DS_Store
 
 # C extensions
 .vscode/
